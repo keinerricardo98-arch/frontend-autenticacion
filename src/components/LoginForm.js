@@ -1,190 +1,276 @@
 import React, { useState } from 'react';
-import '../../styles/LoginForm.css'; // Si tienes esta ruta
+import { authService } from '../services/authService';
 
-function LoginForm() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [rememberMe, setRememberMe] = useState(false);
-  const [twoFA, setTwoFA] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+const LoginForm = ({ onLoginSuccess }) => {
+  const [formData, setFormData] = useState({
+    identifier: '',
+    credential: '',
+    authMethod: 'password',
+    twoFactorEnabled: false
+  });
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState('');
+  const [twoFactorData, setTwoFactorData] = useState(null);
+
+  const handleChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value
+    }));
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError('');
-    setSuccess('');
-    
-    if (!email || !password) {
-      setError('Por favor ingresa email y contraseña');
-      return;
-    }
-    
-    setIsLoading(true);
-    
+    setLoading(true);
+    setMessage('');
+
     try {
-      // Simular llamada a API
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      // Credenciales válidas
-      const validEmails = ['usuario1', 'usuario1@email.com'];
-      const validPassword = 'password123';
-      
-      const isEmailValid = validEmails.includes(email.toLowerCase().trim());
-      const isPasswordValid = password === validPassword;
-      
-      if (isEmailValid && isPasswordValid) {
-        setSuccess('✅ ¡Autenticación exitosa! Redirigiendo...');
-        
-        // Simular redirección
-        setTimeout(() => {
-          // window.location.href = '/dashboard';
-          console.log('Redirigiendo al dashboard...');
-        }, 2000);
-        
+      const response = await authService.login(
+        formData.identifier,
+        formData.credential,
+        formData.authMethod,
+        formData.twoFactorEnabled
+      );
+
+      if (response.success) {
+        if (response.twoFactorRequired) {
+          setTwoFactorData({
+            sessionToken: response.token || 'session-temp',
+            message: response.message
+          });
+          setMessage('🔐 Se requiere verificación 2FA');
+        } else {
+          onLoginSuccess(response);
+          setMessage('✅ ' + response.message);
+        }
       } else {
-        setError('❌ Credenciales incorrectas. Usa: usuario1 / password123');
+        setMessage('❌ ' + response.message);
       }
-      
-    } catch (err) {
-      setError('Error en el servidor. Intenta de nuevo.');
+    } catch (error) {
+      setMessage('❌ Error de conexión: ' + error.message);
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
-  const handleDemoLogin = () => {
-    setEmail('usuario1@email.com');
-    setPassword('password123');
-    setSuccess('Credenciales de demo cargadas. Haz clic en "Iniciar Sesión"');
-    setError('');
+  const handle2FASubmit = async (e) => {
+    e.preventDefault();
+    const code = e.target.code.value;
+    
+    if (!twoFactorData) return;
+
+    setLoading(true);
+    try {
+      const response = await authService.verify2FA(twoFactorData.sessionToken, code);
+      
+      if (response.success) {
+        onLoginSuccess(response);
+        setMessage('✅ ' + response.message);
+        setTwoFactorData(null);
+      } else {
+        setMessage('❌ ' + response.message);
+      }
+    } catch (error) {
+      setMessage('❌ Error en verificación 2FA');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleSocialLogin = (provider) => {
-    setSuccess(`Iniciando sesión con ${provider}... (simulación)`);
-    // Aquí iría la integración real con OAuth
-  };
+  if (twoFactorData) {
+    return (
+      <div style={styles.loginContainer}>
+        <div style={styles.loginForm}>
+          <h2>🔐 Verificación en Dos Pasos</h2>
+          <p>{twoFactorData.message}</p>
+          <p><strong>Código de demostración: 123456</strong></p>
+          
+          <form onSubmit={handle2FASubmit}>
+            <div style={styles.formGroup}>
+              <label>Código 2FA:</label>
+              <input
+                type="text"
+                name="code"
+                placeholder="Ingresa el código de verificación"
+                required
+                style={styles.input}
+              />
+            </div>
+            
+            <button type="submit" disabled={loading} style={styles.button}>
+              {loading ? 'Verificando...' : 'Verificar Código'}
+            </button>
+          </form>
+          
+          <button 
+            onClick={() => setTwoFactorData(null)}
+            style={{...styles.button, background: '#6c757d', marginTop: '10px'}}
+          >
+            ← Volver al login
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="login-container">
-      <div className="login-box">
-        <div className="header">
-          <h1><i className="fas fa-lock"></i> Sistema de Autenticación</h1>
-          <p className="subtitle">Método de Autenticación: Password</p>
-        </div>
+    <div style={styles.loginContainer}>
+      <div style={styles.loginForm}>
+        <h2>🚀 Sistema de Autenticación</h2>
+        
+        {message && (
+          <div style={{
+            ...styles.message,
+            ...(message.includes('❌') ? styles.error : styles.success)
+          }}>
+            {message}
+          </div>
+        )}
 
-        <form onSubmit={handleSubmit} id="loginForm">
-          <div className="input-group">
-            <label htmlFor="email">
-              <i className="fas fa-user"></i> Usuario/Email:
-            </label>
+        <form onSubmit={handleSubmit}>
+          <div style={styles.formGroup}>
+            <label>Método de Autenticación:</label>
+            <select
+              name="authMethod"
+              value={formData.authMethod}
+              onChange={handleChange}
+              style={styles.input}
+            >
+              <option value="password">Password</option>
+              <option value="google">Google</option>
+              <option value="facebook">Facebook</option>
+            </select>
+          </div>
+
+          <div style={styles.formGroup}>
+            <label>Usuario/Email:</label>
             <input
               type="text"
-              id="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              name="identifier"
+              value={formData.identifier}
+              onChange={handleChange}
               placeholder="usuario1 o usuario1@email.com"
-              disabled={isLoading}
+              required
+              style={styles.input}
             />
           </div>
 
-          <div className="input-group">
-            <label htmlFor="password">
-              <i className="fas fa-key"></i> Contraseña:
+          <div style={styles.formGroup}>
+            <label>
+              {formData.authMethod === 'password' ? 'Contraseña' : 'Token'}:
             </label>
             <input
               type="password"
-              id="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="password123"
-              disabled={isLoading}
+              name="credential"
+              value={formData.credential}
+              onChange={handleChange}
+              placeholder={
+                formData.authMethod === 'password' ? 
+                'password123' : 'google_token o facebook_token'
+              }
+              required
+              style={styles.input}
             />
           </div>
 
-          <div className="options">
-            <label className="checkbox">
+          <div style={styles.checkboxGroup}>
+            <label>
               <input
                 type="checkbox"
-                checked={rememberMe}
-                onChange={(e) => setRememberMe(e.target.checked)}
-                disabled={isLoading}
+                name="twoFactorEnabled"
+                checked={formData.twoFactorEnabled}
+                onChange={handleChange}
               />
-              <span>Recordar mi sesión</span>
-            </label>
-            
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                checked={twoFA}
-                onChange={(e) => setTwoFA(e.target.checked)}
-                disabled={isLoading}
-              />
-              <span>Autenticación en Dos Pasos (2FA)</span>
+              Autenticación en Dos Pasos (2FA)
             </label>
           </div>
 
-          <button
-            type="submit"
-            className="login-btn"
-            disabled={isLoading}
-          >
-            {isLoading ? (
-              <>
-                <i className="fas fa-spinner fa-spin"></i> Validando...
-              </>
-            ) : (
-              <>
-                <i className="fas fa-sign-in-alt"></i> Iniciar Sesión
-              </>
-            )}
-          </button>
-
-          <button
-            type="button"
-            className="demo-btn"
-            onClick={handleDemoLogin}
-            disabled={isLoading}
-          >
-            <i className="fas fa-magic"></i> Usar Credenciales de Demo
+          <button type="submit" disabled={loading} style={styles.button}>
+            {loading ? 'Autenticando...' : 'Iniciar Sesión'}
           </button>
         </form>
 
-        <div className="credentials-box">
-          <h3><i className="fas fa-info-circle"></i> Credenciales de Demo:</h3>
-          <ul>
-            <li><strong>Password:</strong> usuario1 / password123</li>
-            <li><strong>Google:</strong> cualquier@email.com / google_token</li>
-            <li><strong>Facebook:</strong> cualquier@email.com / facebook_token</li>
-            <li><strong>2FA:</strong> Código: 123456</li>
-          </ul>
+        <div style={styles.demoCredentials}>
+          <h4>🧪 Credenciales de Demo:</h4>
+          <p><strong>Password:</strong> usuario1 / password123</p>
+          <p><strong>Google:</strong> cualquier@email.com / google_token</p>
+          <p><strong>Facebook:</strong> cualquier@email.com / facebook_token</p>
+          <p><strong>2FA:</strong> Código: 123456</p>
         </div>
-
-        <div className="social-login">
-          <p className="divider">O inicia sesión con:</p>
-          <div className="social-buttons">
-            <button
-              className="social-btn google"
-              onClick={() => handleSocialLogin('Google')}
-              disabled={isLoading}
-            >
-              <i className="fab fa-google"></i> Google
-            </button>
-            <button
-              className="social-btn facebook"
-              onClick={() => handleSocialLogin('Facebook')}
-              disabled={isLoading}
-            >
-              <i className="fab fa-facebook"></i> Facebook
-            </button>
-          </div>
-        </div>
-
-        {error && <div className="message error">{error}</div>}
-        {success && <div className="message success">{success}</div>}
       </div>
     </div>
   );
-}
+};
+
+const styles = {
+  loginContainer: {
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    minHeight: '100vh',
+    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    padding: '20px'
+  },
+  loginForm: {
+    background: 'white',
+    padding: '40px',
+    borderRadius: '15px',
+    boxShadow: '0 15px 35px rgba(0, 0, 0, 0.1)',
+    width: '100%',
+    maxWidth: '450px'
+  },
+  formGroup: {
+    marginBottom: '20px'
+  },
+  input: {
+    width: '100%',
+    padding: '12px 15px',
+    border: '2px solid #e1e5e9',
+    borderRadius: '8px',
+    fontSize: '16px',
+    marginTop: '5px'
+  },
+  checkboxGroup: {
+    marginBottom: '20px',
+    display: 'flex',
+    alignItems: 'center'
+  },
+  button: {
+    width: '100%',
+    padding: '14px',
+    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    color: 'white',
+    border: 'none',
+    borderRadius: '8px',
+    fontSize: '16px',
+    fontWeight: '600',
+    cursor: 'pointer'
+  },
+  message: {
+    padding: '12px',
+    borderRadius: '8px',
+    marginBottom: '20px',
+    textAlign: 'center',
+    fontWeight: '600'
+  },
+  success: {
+    background: '#d4edda',
+    color: '#155724',
+    border: '1px solid #c3e6cb'
+  },
+  error: {
+    background: '#f8d7da',
+    color: '#721c24',
+    border: '1px solid #f5c6cb'
+  },
+  demoCredentials: {
+    marginTop: '30px',
+    padding: '20px',
+    background: '#f8f9fa',
+    borderRadius: '8px',
+    borderLeft: '4px solid #667eea'
+  }
+};
 
 export default LoginForm;
